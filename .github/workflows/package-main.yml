@@ -38,7 +38,6 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const core = require('@actions/core');
             const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
             const name = `${pkg.name}-${pkg.version}.vsix`;
             core.setOutput('name', name);
