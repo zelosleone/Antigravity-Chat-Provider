@@ -1,0 +1,55 @@
+{
+  "name": "antigravity-chat-provider",
+  "displayName": "Antigravity Chat Provider",
+  "description": "Use Antigravity (Google IDE OAuth) models in VS Code Copilot Chat via LanguageModelChatProvider.",
+  "version": "0.0.1",
+  "publisher": "DenizhanDaklr",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zelosleone/Antigravity-Chat-Provider"
+  },
+  "engines": {
+    "vscode": "^1.108.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguageModelChatProvider:antigravity"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "antigravity.manage",
+        "title": "Antigravity: Manage Authentication"
+      },
+      {
+        "command": "antigravity.auth.login",
+        "title": "Antigravity: Sign In"
+      },
+      {
+        "command": "antigravity.auth.logout",
+        "title": "Antigravity: Sign Out"
+      }
+    ],
+    "languageModelChatProviders": [
+      {
+        "vendor": "antigravity",
+        "displayName": "Antigravity",
+        "managementCommand": "antigravity.manage"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -w -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/vscode": "^1.108.0",
+    "typescript": "^5.6.3"
+  }
+}
