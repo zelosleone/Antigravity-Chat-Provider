@@ -40,8 +40,8 @@ jobs:
             const fs = require('fs');
             const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
             const name = `${pkg.name}-${pkg.version}.vsix`;
-            core.setOutput('name', name);
-            core.setOutput('version', pkg.version);
+            fs.appendFileSync(process.env['GITHUB_OUTPUT'], `name=${name}\n`);
+            fs.appendFileSync(process.env['GITHUB_OUTPUT'], `version=${pkg.version}\n`);
 
       - name: Package extension (.vsix)
         run: npx -y vsce package -o "${{ steps.vsix-info.outputs.name }}"
