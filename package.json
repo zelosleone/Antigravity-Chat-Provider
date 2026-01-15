@@ -2,7 +2,7 @@
   "name": "antigravity-chat-provider",
   "displayName": "Antigravity Chat Provider",
   "description": "Use Antigravity (Google IDE OAuth) models in VS Code Copilot Chat via LanguageModelChatProvider.",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "DenizhanDaklr",
   "icon": "images/icon.png",
   "license": "MIT",

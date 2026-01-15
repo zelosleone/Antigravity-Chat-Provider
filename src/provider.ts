@@ -59,6 +59,7 @@ function convertMessages(
   signatureByCallId?: Map<string, string>,
   fallbackSignature?: string,
   allowToolHistory = true,
+  allowFallbackSignature = true,
 ): ConvertedMessages {
   const contents: Array<Record<string, unknown>> = [];
   const systemParts: Array<{ text: string }> = [];
@@ -76,6 +77,7 @@ function convertMessages(
 
     const role = roleValue === vscode.LanguageModelChatMessageRole.Assistant ? "model" : "user";
     const parts: Array<Record<string, unknown>> = [];
+    const toolResultParts: Array<Record<string, unknown>> = [];
 
     for (const part of message.content) {
       if (part instanceof vscode.LanguageModelTextPart) {
@@ -90,7 +92,8 @@ function convertMessages(
           continue;
         }
         toolNameById.set(part.callId, part.name);
-        const signature = signatureByCallId?.get(part.callId) ?? fallbackSignature;
+        const signature = signatureByCallId?.get(part.callId)
+          ?? (allowFallbackSignature ? fallbackSignature : undefined);
         parts.push({
           functionCall: {
             name: part.name,
@@ -112,19 +115,29 @@ function convertMessages(
           .filter((value) => value.length > 0)
           .join("\n");
 
-        parts.push({
+        const toolResponse = {
           functionResponse: {
             name,
             id: part.callId,
             response: contentText ? { content: contentText } : {},
           },
-        });
+        };
+
+        if (role === "model") {
+          toolResultParts.push(toolResponse);
+        } else {
+          parts.push(toolResponse);
+        }
         continue;
       }
     }
 
     if (parts.length > 0) {
       contents.push({ role, parts });
+    }
+
+    if (toolResultParts.length > 0) {
+      contents.push({ role: "user", parts: toolResultParts });
     }
   }
 
@@ -138,18 +151,144 @@ function convertMessages(
   return { contents };
 }
 
+function hasToolHistory(
+  messages: readonly vscode.LanguageModelChatRequestMessage[],
+): boolean {
+  for (const message of messages) {
+    for (const part of message.content) {
+      if (part instanceof vscode.LanguageModelToolCallPart || part instanceof vscode.LanguageModelToolResultPart) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function buildTools(tools: readonly vscode.LanguageModelChatTool[] | undefined): Array<Record<string, unknown>> | undefined {
   if (!tools || tools.length === 0) {
     return undefined;
   }
 
+  const normalizeToolSchema = (schema: unknown): Record<string, unknown> => {
+    const cleaned = cleanJSONSchemaForAntigravity(schema ?? {});
+    const isObject = cleaned && typeof cleaned === "object" && !Array.isArray(cleaned);
+    const asRecord = isObject ? (cleaned as Record<string, unknown>) : {};
+
+    const hasObjectType = asRecord.type === "object" || asRecord.type === undefined;
+    const hasProperties = asRecord.properties
+      && typeof asRecord.properties === "object"
+      && Object.keys(asRecord.properties as Record<string, unknown>).length > 0;
+
+    if (isObject && hasObjectType) {
+      if (!hasProperties) {
+        return {
+          ...asRecord,
+          type: "object",
+          properties: {
+            _placeholder: {
+              type: "boolean",
+              description: "Placeholder. Always pass true.",
+            },
+          },
+          required: Array.isArray(asRecord.required)
+            ? Array.from(new Set([...(asRecord.required as string[]), "_placeholder"]))
+            : ["_placeholder"],
+        };
+      }
+      return { ...asRecord, type: "object" };
+    }
+
+    return {
+      type: "object",
+      properties: {
+        _placeholder: {
+          type: "boolean",
+          description: "Placeholder. Always pass true.",
+        },
+      },
+      required: ["_placeholder"],
+    };
+  };
+
   const declarations = tools.map((tool) => ({
     name: tool.name,
     description: tool.description ?? "",
-    parameters: cleanJSONSchemaForAntigravity(tool.inputSchema ?? {}),
+    parameters: normalizeToolSchema(tool.inputSchema ?? {}),
   }));
 
   return [{ functionDeclarations: declarations }];
+}
+
+function normalizeGeminiCliSchemaTypes(schema: unknown): unknown {
+  if (!schema || typeof schema !== "object") {
+    return schema;
+  }
+  if (Array.isArray(schema)) {
+    return schema.map((item) => normalizeGeminiCliSchemaTypes(item));
+  }
+
+  const record = schema as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (key === "type") {
+      if (typeof value === "string") {
+        result[key] = value.toUpperCase();
+      } else if (Array.isArray(value)) {
+        result[key] = value.map((entry) => (typeof entry === "string" ? entry.toUpperCase() : entry));
+      } else {
+        result[key] = value;
+      }
+      continue;
+    }
+    result[key] = normalizeGeminiCliSchemaTypes(value);
+  }
+  return result;
+}
+
+function ensureGeminiCliObjectSchema(schema: unknown): Record<string, unknown> {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return { type: "OBJECT", properties: {} };
+  }
+
+  const record = schema as Record<string, unknown>;
+  const properties = record.properties;
+  const hasProperties = properties && typeof properties === "object" && !Array.isArray(properties);
+
+  return {
+    ...record,
+    type: "OBJECT",
+    properties: hasProperties ? properties : {},
+  };
+}
+
+function normalizeGeminiCliToolSchemas(payload: Record<string, unknown>): void {
+  if (!Array.isArray(payload.tools)) {
+    return;
+  }
+
+  payload.tools = (payload.tools as Array<Record<string, unknown>>).map((tool) => {
+    if (!tool || typeof tool !== "object") {
+      return tool;
+    }
+    const fnDecls = tool.functionDeclarations;
+    if (!Array.isArray(fnDecls)) {
+      return tool;
+    }
+    const normalizedDecls = fnDecls.map((decl) => {
+      if (!decl || typeof decl !== "object") {
+        return decl;
+      }
+      const record = decl as Record<string, unknown>;
+      if (record.parameters) {
+        const normalized = normalizeGeminiCliSchemaTypes(record.parameters);
+        record.parameters = ensureGeminiCliObjectSchema(normalized);
+      } else {
+        record.parameters = { type: "OBJECT", properties: {} };
+      }
+      return record;
+    });
+    return { ...tool, functionDeclarations: normalizedDecls };
+  });
 }
 
 function applySystemInstruction(
@@ -242,14 +381,25 @@ function buildRequestPayload(
   headerStyle: HeaderStyle,
   signatureByCallId?: Map<string, string>,
   fallbackSignature?: string,
+  fallbackThought?: ThoughtSignatureCache,
 ): Record<string, unknown> {
-  const allowToolHistory = !!(options.tools && options.tools.length > 0);
+  const allowToolHistory = !!(options.tools && options.tools.length > 0) || hasToolHistory(messages);
+  const allowFallbackSignature = isClaudeModel(modelId);
   const { contents, systemInstruction } = convertMessages(
     messages,
     signatureByCallId,
     fallbackSignature,
     allowToolHistory,
+    allowFallbackSignature,
   );
+
+  if (headerStyle === "gemini-cli") {
+    enforceGeminiToolPairing(contents);
+  }
+
+  if (isClaudeThinkingModel(modelId)) {
+    ensureClaudeThinkingToolHistory(contents, fallbackThought);
+  }
 
   const payload: Record<string, unknown> = {
     contents,
@@ -274,7 +424,139 @@ function buildRequestPayload(
     };
   }
 
+  if (headerStyle === "gemini-cli") {
+    normalizeGeminiCliToolSchemas(payload);
+  }
+
   return payload;
+}
+
+function enforceGeminiToolPairing(
+  contents: Array<Record<string, unknown>>,
+): void {
+  const normalized: Array<Record<string, unknown>> = [];
+  let idx = 0;
+
+  while (idx < contents.length) {
+    const current = contents[idx];
+    const parts = current?.parts as Array<Record<string, unknown>> | undefined;
+    const hasToolCalls = Array.isArray(parts) && parts.some((part) => !!part.functionCall);
+
+    if (!hasToolCalls || current.role !== "model") {
+      normalized.push(current);
+      idx += 1;
+      continue;
+    }
+
+    const next = contents[idx + 1];
+    const nextParts = next?.parts as Array<Record<string, unknown>> | undefined;
+
+    // Extract call IDs and response IDs for ID-based matching
+    const callIds = new Set<string>();
+    for (const part of parts ?? []) {
+      const call = part.functionCall as Record<string, unknown> | undefined;
+      if (call?.id && typeof call.id === "string") {
+        callIds.add(call.id);
+      }
+    }
+
+    const responseIds = new Set<string>();
+    for (const part of nextParts ?? []) {
+      const resp = part.functionResponse as Record<string, unknown> | undefined;
+      if (resp?.id && typeof resp.id === "string") {
+        responseIds.add(resp.id);
+      }
+    }
+
+    // Find matched IDs (calls that have corresponding responses)
+    const matchedIds = new Set([...callIds].filter(id => responseIds.has(id)));
+
+    if (matchedIds.size > 0 && next?.role === "user") {
+      // Keep only matched call/response pairs by ID
+      const filteredModelParts = parts!.filter((part) => {
+        if (!part.functionCall) return true;
+        const call = part.functionCall as Record<string, unknown>;
+        return matchedIds.has(call.id as string);
+      });
+
+      const filteredUserParts = nextParts!.filter((part) => {
+        if (!part.functionResponse) return true;
+        const resp = part.functionResponse as Record<string, unknown>;
+        return matchedIds.has(resp.id as string);
+      });
+
+      if (filteredModelParts.length > 0) {
+        normalized.push({ ...current, parts: filteredModelParts });
+      }
+      if (filteredUserParts.length > 0) {
+        normalized.push({ ...next, parts: filteredUserParts });
+      }
+      idx += 2;
+      continue;
+    }
+
+    // No matching responses - strip all tool calls, keep other parts
+    const nonToolParts = parts?.filter((part) => !part.functionCall);
+    if (nonToolParts && nonToolParts.length > 0) {
+      normalized.push({ ...current, parts: nonToolParts });
+    }
+    idx += 1;
+  }
+
+  contents.splice(0, contents.length, ...normalized);
+}
+
+function ensureClaudeThinkingToolHistory(
+  contents: Array<Record<string, unknown>>,
+  fallbackThought?: ThoughtSignatureCache,
+): void {
+  // Process ALL model messages to ensure thinking blocks come first
+  for (const content of contents) {
+    if (!content || typeof content !== "object" || content.role !== "model" || !Array.isArray(content.parts)) {
+      continue;
+    }
+
+    const parts = content.parts as Array<Record<string, unknown>>;
+    if (parts.length === 0) {
+      continue;
+    }
+
+    // Check if first part is already a thinking block
+    const first = parts[0];
+    const isThinkingFirst = !!first && typeof first === "object" && (
+      first.thought === true || first.type === "thinking" || first.type === "redacted_thinking"
+    );
+
+    // Separate thinking parts from other parts
+    const thinkingParts: Array<Record<string, unknown>> = [];
+    const otherParts: Array<Record<string, unknown>> = [];
+
+    for (const part of parts) {
+      const isThinking = part.thought === true || part.type === "thinking" || part.type === "redacted_thinking";
+      if (isThinking) {
+        thinkingParts.push(part);
+      } else {
+        otherParts.push(part);
+      }
+    }
+
+    // If there are thinking parts but text comes first, reorder to put thinking first
+    if (thinkingParts.length > 0 && !isThinkingFirst) {
+      content.parts = [...thinkingParts, ...otherParts];
+      continue;
+    }
+
+    // If no thinking parts but has tool calls, inject fallback thinking block
+    const hasToolCalls = otherParts.some((part) => !!part.functionCall);
+    if (thinkingParts.length === 0 && hasToolCalls && fallbackThought?.text && fallbackThought?.signature) {
+      const thinkingPart: Record<string, unknown> = {
+        thought: true,
+        text: fallbackThought.text,
+        thoughtSignature: fallbackThought.signature,
+      };
+      content.parts = [thinkingPart, ...parts];
+    }
+  }
 }
 
 function applyModelTransforms(
@@ -359,6 +641,8 @@ function extractThoughtSignature(response: Record<string, unknown>): ThoughtSign
         }
         const signature = typeof part.thoughtSignature === "string"
           ? part.thoughtSignature
+          : typeof part.signature === "string"
+            ? part.signature
           : typeof metadataSignature === "string"
             ? metadataSignature
             : undefined;
@@ -453,6 +737,8 @@ function handleResponseParts(
           ?.thoughtSignature;
         const signature = typeof part.thoughtSignature === "string"
           ? part.thoughtSignature
+          : typeof part.signature === "string"
+            ? part.signature
           : typeof metadataSignature === "string"
             ? metadataSignature
             : undefined;
@@ -482,6 +768,8 @@ function handleResponseParts(
           ?.thoughtSignature;
         const signature = typeof part.thoughtSignature === "string"
           ? part.thoughtSignature
+          : typeof part.signature === "string"
+            ? part.signature
           : typeof metadataSignature === "string"
             ? metadataSignature
             : undefined;
@@ -564,6 +852,10 @@ function injectCachedThinkingSignature(
   if (!cached?.signature) {
     return;
   }
+  const hasThoughtText = typeof cached.text === "string" && cached.text.trim().length > 0;
+  if (!hasThoughtText) {
+    return;
+  }
 
   if (!Array.isArray(payload.contents)) {
     return;
@@ -595,9 +887,7 @@ function injectCachedThinkingSignature(
       return part;
     });
 
-    const hasThoughtText = typeof cached.text === "string" && cached.text.length > 0;
-
-    if (hasSignedThinking || !hasThoughtText) {
+    if (hasSignedThinking) {
       return { ...content, parts: injectedParts };
     }
 
@@ -665,6 +955,7 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
       headerStyle,
       this.toolCallSignatures,
       this.lastThoughtSignature?.signature,
+      this.lastThoughtSignature,
     );
     applyModelTransforms(payload, resolved);
 
