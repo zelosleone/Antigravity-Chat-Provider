@@ -16,17 +16,9 @@ interface PkcePair {
   verifier: string;
 }
 
-function toBase64Url(buffer: Buffer): string {
-  return buffer
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
 function generatePKCE(): PkcePair {
-  const verifier = toBase64Url(crypto.randomBytes(32));
-  const challenge = toBase64Url(crypto.createHash("sha256").update(verifier).digest());
+  const verifier = crypto.randomBytes(32).toString("base64url");
+  const challenge = crypto.createHash("sha256").update(verifier).digest().toString("base64url");
   return { verifier, challenge };
 }
 
@@ -35,9 +27,6 @@ interface AntigravityAuthState {
   projectId: string;
 }
 
-/**
- * Result returned to the caller after constructing an OAuth authorization URL.
- */
 export interface AntigravityAuthorization {
   url: string;
   verifier: string;
@@ -72,16 +61,10 @@ interface AntigravityUserInfo {
   email?: string;
 }
 
-/**
- * Encode an object into a URL-safe base64 string.
- */
 function encodeState(payload: AntigravityAuthState): string {
   return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
 }
 
-/**
- * Decode an OAuth state parameter back into its structured representation.
- */
 function decodeState(state: string): AntigravityAuthState {
   const normalized = state.replace(/-/g, "+").replace(/_/g, "/");
   const padded = normalized.padEnd(normalized.length + ((4 - normalized.length % 4) % 4), "=");
@@ -96,9 +79,6 @@ function decodeState(state: string): AntigravityAuthState {
   };
 }
 
-/**
- * Build the Antigravity OAuth authorization URL including PKCE and optional project metadata.
- */
 export async function authorizeAntigravity(projectId = ""): Promise<AntigravityAuthorization> {
   const pkce = generatePKCE();
 
@@ -206,9 +186,6 @@ async function fetchProjectID(accessToken: string): Promise<string> {
   return "";
 }
 
-/**
- * Exchange an authorization code for Antigravity CLI access and refresh tokens.
- */
 export async function exchangeAntigravity(
   code: string,
   state: string,
