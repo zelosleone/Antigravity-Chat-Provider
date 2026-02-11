@@ -31,7 +31,7 @@ interface AntigravityAuthState {
   projectId: string;
 }
 
-export interface AntigravityAuthorization {
+interface AntigravityAuthorization {
   url: string;
   verifier: string;
   projectId: string;
@@ -51,7 +51,7 @@ interface AntigravityTokenExchangeFailure {
   error: string;
 }
 
-export type AntigravityTokenExchangeResult =
+type AntigravityTokenExchangeResult =
   | AntigravityTokenExchangeSuccess
   | AntigravityTokenExchangeFailure;
 

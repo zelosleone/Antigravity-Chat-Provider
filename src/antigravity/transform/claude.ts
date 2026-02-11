@@ -133,7 +133,7 @@ function convertStopSequences(generationConfig: Record<string, unknown>): void {
   }
 }
 
-export interface ClaudeTransformOptions {
+interface ClaudeTransformOptions {
   model: string;
   tierThinkingBudget?: number;
   normalizedThinking?: {includeThoughts?: boolean; thinkingBudget?: number};

@@ -62,7 +62,7 @@ function normalizeGeminiTools(payload: RequestPayload): void {
   });
 }
 
-export interface GeminiTransformOptions {
+interface GeminiTransformOptions {
   model: string;
   tierThinkingBudget?: number;
   tierThinkingLevel?: ThinkingTier;

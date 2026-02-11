@@ -12,7 +12,7 @@ import {ANTIGRAVITY_REDIRECT_URI} from './antigravity/constants';
 const AUTH_SECRET_KEY = 'antigravity.auth';
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 
-export interface StoredAuth extends OAuthAuthDetails {
+interface StoredAuth extends OAuthAuthDetails {
   email?: string;
 }
 
