@@ -122,7 +122,7 @@ function mergeAllOf(schema: SchemaObject): SchemaObject {
   delete out.allOf;
 
   const mergedProps: SchemaObject = {
-    ...(asSchemaObject(out.properties) ?? {}),
+    ...asSchemaObject(out.properties),
   };
   const required = new Set<string>(
     Array.isArray(out.required)
