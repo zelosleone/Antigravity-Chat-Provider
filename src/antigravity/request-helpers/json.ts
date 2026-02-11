@@ -1,28 +1,103 @@
 const SKIP_PARSE_KEYS = new Set([
-  "oldString",
-  "newString",
-  "content",
-  "filePath",
-  "path",
-  "text",
-  "code",
-  "source",
-  "data",
-  "body",
-  "message",
-  "prompt",
-  "input",
-  "output",
-  "result",
-  "value",
-  "query",
-  "pattern",
-  "replacement",
-  "template",
-  "script",
-  "command",
-  "snippet",
+  'oldString',
+  'newString',
+  'content',
+  'filePath',
+  'path',
+  'text',
+  'code',
+  'source',
+  'data',
+  'body',
+  'message',
+  'prompt',
+  'input',
+  'output',
+  'result',
+  'value',
+  'query',
+  'pattern',
+  'replacement',
+  'template',
+  'script',
+  'command',
+  'snippet',
 ]);
+
+type JsonParseResult = {ok: true; value: unknown} | {ok: false};
+
+function parseJson(value: string): JsonParseResult {
+  try {
+    return {ok: true, value: JSON.parse(value)};
+  } catch {
+    return {ok: false};
+  }
+}
+
+function parseEscapedControlText(value: string): string | undefined {
+  const hasControlCharEscapes = value.includes('\\n') || value.includes('\\t');
+  if (!hasControlCharEscapes) {
+    return undefined;
+  }
+
+  const hasIntentionalEscapes = value.includes('\\"') || value.includes('\\\\');
+  if (hasIntentionalEscapes) {
+    return undefined;
+  }
+
+  const parsed = parseJson(`"${value}"`);
+  return parsed.ok && typeof parsed.value === 'string'
+    ? parsed.value
+    : undefined;
+}
+
+function parseCompleteContainer(value: string): unknown | undefined {
+  const stripped = value.trim();
+  if (!stripped) {
+    return undefined;
+  }
+
+  const isObject = stripped.startsWith('{') && stripped.endsWith('}');
+  const isArray = stripped.startsWith('[') && stripped.endsWith(']');
+  if (!isObject && !isArray) {
+    return undefined;
+  }
+
+  const parsed = parseJson(value);
+  return parsed.ok ? parsed.value : undefined;
+}
+
+function parseTruncatedContainer(value: string): unknown | undefined {
+  for (const [open, close] of [
+    ['[', ']'],
+    ['{', '}'],
+  ] as const) {
+    if (!value.startsWith(open) || value.endsWith(close)) {
+      continue;
+    }
+
+    const last = value.lastIndexOf(close);
+    if (last <= 0) {
+      continue;
+    }
+
+    const parsed = parseJson(value.slice(0, last + 1));
+    if (parsed.ok) {
+      return parsed.value;
+    }
+  }
+
+  return undefined;
+}
+
+function parseContainerCandidate(value: string): unknown | undefined {
+  const stripped = value.trim();
+  if (!stripped || (stripped[0] !== '{' && stripped[0] !== '[')) {
+    return undefined;
+  }
+
+  return parseCompleteContainer(value) ?? parseTruncatedContainer(stripped);
+}
 
 export function recursivelyParseJsonStrings(
   obj: unknown,
@@ -34,10 +109,10 @@ export function recursivelyParseJsonStrings(
   }
 
   if (Array.isArray(obj)) {
-    return obj.map((item) => recursivelyParseJsonStrings(item, skipParseKeys));
+    return obj.map(item => recursivelyParseJsonStrings(item, skipParseKeys));
   }
 
-  if (typeof obj === "object") {
+  if (typeof obj === 'object') {
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(obj)) {
       result[key] = recursivelyParseJsonStrings(value, skipParseKeys, key);
@@ -45,7 +120,7 @@ export function recursivelyParseJsonStrings(
     return result;
   }
 
-  if (typeof obj !== "string") {
+  if (typeof obj !== 'string') {
     return obj;
   }
 
@@ -53,37 +128,14 @@ export function recursivelyParseJsonStrings(
     return obj;
   }
 
-  const stripped = obj.trim();
-  const hasControlCharEscapes = obj.includes("\\n") || obj.includes("\\t");
-  const hasIntentionalEscapes = obj.includes('\\"') || obj.includes("\\\\");
-
-  if (hasControlCharEscapes && !hasIntentionalEscapes) {
-    try {
-      return JSON.parse(`"${obj}"`);
-    } catch {
-    }
+  const parsedEscapedText = parseEscapedControlText(obj);
+  if (parsedEscapedText !== undefined) {
+    return parsedEscapedText;
   }
 
-  if (stripped && (stripped[0] === "{" || stripped[0] === "[")) {
-    if (
-      (stripped.startsWith("{") && stripped.endsWith("}")) ||
-      (stripped.startsWith("[") && stripped.endsWith("]"))
-    ) {
-      try {
-        const parsed = JSON.parse(obj);
-        return recursivelyParseJsonStrings(parsed);
-      } catch {
-      }
-    }
-
-    for (const [open, close] of [["[", "]"], ["{", "}"]] as const) {
-      if (stripped.startsWith(open) && !stripped.endsWith(close)) {
-        try {
-          const last = stripped.lastIndexOf(close);
-          if (last > 0) return recursivelyParseJsonStrings(JSON.parse(stripped.slice(0, last + 1)));
-        } catch {}
-      }
-    }
+  const parsedContainer = parseContainerCandidate(obj);
+  if (parsedContainer !== undefined) {
+    return recursivelyParseJsonStrings(parsedContainer, skipParseKeys);
   }
 
   return obj;

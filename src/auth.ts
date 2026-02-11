@@ -1,19 +1,35 @@
-import * as http from "node:http";
-import * as vscode from "vscode";
-import { authorizeAntigravity, exchangeAntigravity } from "./antigravity/oauth";
+import * as http from 'node:http';
+import * as vscode from 'vscode';
+import {authorizeAntigravity, exchangeAntigravity} from './antigravity/oauth';
 import {
   accessTokenExpired,
   parseRefreshParts,
   type OAuthAuthDetails,
-} from "./antigravity/auth-helpers";
-import { refreshAccessToken } from "./antigravity/token";
-import { ANTIGRAVITY_REDIRECT_URI } from "./antigravity/constants";
+} from './antigravity/auth-helpers';
+import {refreshAccessToken} from './antigravity/token';
+import {ANTIGRAVITY_REDIRECT_URI} from './antigravity/constants';
 
-const AUTH_SECRET_KEY = "antigravity.auth";
+const AUTH_SECRET_KEY = 'antigravity.auth';
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 
 export interface StoredAuth extends OAuthAuthDetails {
   email?: string;
+}
+
+function parseJson<T>(value: string): T | undefined {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseURL(value: string): URL | undefined {
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
 }
 
 export async function getStoredAuth(
@@ -23,90 +39,101 @@ export async function getStoredAuth(
   if (!raw) {
     return undefined;
   }
-  try {
-    return JSON.parse(raw) as StoredAuth;
-  } catch {
-    return undefined;
-  }
+  return parseJson<StoredAuth>(raw);
 }
 
-async function storeAuth(context: vscode.ExtensionContext, auth: StoredAuth): Promise<void> {
+async function storeAuth(
+  context: vscode.ExtensionContext,
+  auth: StoredAuth,
+): Promise<void> {
   await context.secrets.store(AUTH_SECRET_KEY, JSON.stringify(auth));
 }
 
-export async function clearAuth(context: vscode.ExtensionContext): Promise<void> {
+export async function clearAuth(
+  context: vscode.ExtensionContext,
+): Promise<void> {
   await context.secrets.delete(AUTH_SECRET_KEY);
 }
 
 function getRedirectPort(): number {
-  try {
-    const url = new URL(ANTIGRAVITY_REDIRECT_URI);
-    return Number(url.port) || 51121;
-  } catch {
+  const url = parseURL(ANTIGRAVITY_REDIRECT_URI);
+  if (!url) {
     return 51121;
   }
+
+  const port = Number(url.port);
+  return Number.isFinite(port) && port > 0 ? port : 51121;
 }
 
-async function waitForOAuthCallback(): Promise<{ code: string; state: string } > {
+async function waitForOAuthCallback(): Promise<{
+  code: string;
+  state: string;
+}> {
   const port = getRedirectPort();
 
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       if (!req.url) {
-        res.writeHead(400, { "Content-Type": "text/plain" });
-        res.end("Missing callback URL");
+        res.writeHead(400, {'Content-Type': 'text/plain'});
+        res.end('Missing callback URL');
         return;
       }
 
       const url = new URL(req.url, `http://localhost:${port}`);
-      if (url.pathname !== "/oauth-callback") {
-        res.writeHead(404, { "Content-Type": "text/plain" });
-        res.end("Not found");
+      if (url.pathname !== '/oauth-callback') {
+        res.writeHead(404, {'Content-Type': 'text/plain'});
+        res.end('Not found');
         return;
       }
 
-      const code = url.searchParams.get("code") ?? "";
-      const state = url.searchParams.get("state") ?? "";
+      const code = url.searchParams.get('code') ?? '';
+      const state = url.searchParams.get('state') ?? '';
 
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end("<html><body><h2>Antigravity auth complete.</h2><p>You can close this tab and return to VS Code.</p></body></html>");
+      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+      res.end(
+        '<html><body><h2>Antigravity auth complete.</h2><p>You can close this tab and return to VS Code.</p></body></html>',
+      );
 
       server.close();
       if (!code || !state) {
-        reject(new Error("Missing OAuth code or state"));
+        reject(new Error('Missing OAuth code or state'));
         return;
       }
 
-      resolve({ code, state });
+      resolve({code, state});
     });
 
-    server.on("error", (error) => {
+    server.on('error', error => {
       reject(error);
     });
 
-    server.listen(port, "127.0.0.1", () => {
+    server.listen(port, '127.0.0.1', () => {
       const timeout = setTimeout(() => {
         server.close();
-        reject(new Error("OAuth login timed out"));
+        reject(new Error('OAuth login timed out'));
       }, LOGIN_TIMEOUT_MS);
 
-      server.once("close", () => clearTimeout(timeout));
+      server.once('close', () => clearTimeout(timeout));
     });
   });
 }
 
-export async function loginWithOAuth(context: vscode.ExtensionContext): Promise<StoredAuth> {
+export async function loginWithOAuth(
+  context: vscode.ExtensionContext,
+): Promise<StoredAuth> {
   const authorization = await authorizeAntigravity();
-  const opened = await vscode.env.openExternal(vscode.Uri.parse(authorization.url));
+  const opened = await vscode.env.openExternal(
+    vscode.Uri.parse(authorization.url),
+  );
   if (!opened) {
-    throw new Error("Failed to open browser for OAuth login");
+    throw new Error('Failed to open browser for OAuth login');
   }
 
-  const { code, state } = await waitForOAuthCallback();
+  const {code, state} = await waitForOAuthCallback();
   const result = await exchangeAntigravity(code, state);
 
-  if (result.type !== "success") {
-    throw new Error(result.error || "OAuth exchange failed");
+  if (result.type !== 'success') {
+    throw new Error(result.error || 'OAuth exchange failed');
   }
 
   const stored: StoredAuth = {
@@ -128,7 +155,7 @@ export async function ensureValidAuth(
 
   if (!auth) {
     if (!promptIfMissing) {
-      throw new Error("Antigravity login required");
+      throw new Error('Antigravity login required');
     }
 
     auth = await loginWithOAuth(context);
@@ -137,15 +164,15 @@ export async function ensureValidAuth(
   if (accessTokenExpired(auth)) {
     const refreshed = await refreshAccessToken(auth);
     if (!refreshed) {
-      throw new Error("Failed to refresh Antigravity token");
+      throw new Error('Failed to refresh Antigravity token');
     }
 
-    auth = { ...auth, ...refreshed };
+    auth = {...auth, ...refreshed};
     await storeAuth(context, auth);
   }
 
   if (!auth.access) {
-    throw new Error("Antigravity access token missing");
+    throw new Error('Antigravity access token missing');
   }
 
   return auth;

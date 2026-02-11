@@ -1,6 +1,10 @@
-import { ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET } from "./constants";
-import { calculateTokenExpiry, formatRefreshParts, parseRefreshParts } from "./auth-helpers";
-import type { OAuthAuthDetails, RefreshParts } from "./auth-helpers";
+import {ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET} from './constants';
+import {
+  calculateTokenExpiry,
+  formatRefreshParts,
+  parseRefreshParts,
+} from './auth-helpers';
+import type {OAuthAuthDetails, RefreshParts} from './auth-helpers';
 
 interface OAuthErrorPayload {
   error?:
@@ -13,40 +17,67 @@ interface OAuthErrorPayload {
   error_description?: string;
 }
 
-function parseOAuthErrorPayload(text: string | undefined): { code?: string; description?: string } {
+type ParseResult<T> = {ok: true; value: T} | {ok: false};
+
+function parseJson<T>(value: string): ParseResult<T> {
+  try {
+    return {ok: true, value: JSON.parse(value) as T};
+  } catch {
+    return {ok: false};
+  }
+}
+
+async function readResponseText(
+  response: Response,
+): Promise<string | undefined> {
+  return response.text().then(
+    text => text,
+    () => undefined,
+  );
+}
+
+function parseOAuthErrorPayload(text: string | undefined): {
+  code?: string;
+  description?: string;
+} {
   if (!text) {
     return {};
   }
 
-  try {
-    const payload = JSON.parse(text) as OAuthErrorPayload;
-    if (!payload || typeof payload !== "object") {
-      return { description: text };
-    }
-
-    let code: string | undefined;
-    if (typeof payload.error === "string") {
-      code = payload.error;
-    } else if (payload.error && typeof payload.error === "object") {
-      code = payload.error.status ?? payload.error.code;
-      if (!payload.error_description && payload.error.message) {
-        return { code, description: payload.error.message };
-      }
-    }
-
-    const description = payload.error_description;
-    if (description) {
-      return { code, description };
-    }
-
-    if (payload.error && typeof payload.error === "object" && payload.error.message) {
-      return { code, description: payload.error.message };
-    }
-
-    return { code };
-  } catch {
-    return { description: text };
+  const parsed = parseJson<OAuthErrorPayload>(text);
+  if (!parsed.ok) {
+    return {description: text};
   }
+
+  const payload = parsed.value;
+  if (!payload || typeof payload !== 'object') {
+    return {description: text};
+  }
+
+  let code: string | undefined;
+  if (typeof payload.error === 'string') {
+    code = payload.error;
+  } else if (payload.error && typeof payload.error === 'object') {
+    code = payload.error.status ?? payload.error.code;
+    if (!payload.error_description && payload.error.message) {
+      return {code, description: payload.error.message};
+    }
+  }
+
+  const description = payload.error_description;
+  if (description) {
+    return {code, description};
+  }
+
+  if (
+    payload.error &&
+    typeof payload.error === 'object' &&
+    payload.error.message
+  ) {
+    return {code, description: payload.error.message};
+  }
+
+  return {code};
 }
 
 class AntigravityTokenRefreshError extends Error {
@@ -63,7 +94,7 @@ class AntigravityTokenRefreshError extends Error {
     statusText: string;
   }) {
     super(options.message);
-    this.name = "AntigravityTokenRefreshError";
+    this.name = 'AntigravityTokenRefreshError';
     this.code = options.code;
     this.description = options.description;
     this.status = options.status;
@@ -71,20 +102,22 @@ class AntigravityTokenRefreshError extends Error {
   }
 }
 
-export async function refreshAccessToken(auth: OAuthAuthDetails): Promise<OAuthAuthDetails | undefined> {
+export async function refreshAccessToken(
+  auth: OAuthAuthDetails,
+): Promise<OAuthAuthDetails | undefined> {
   const parts = parseRefreshParts(auth.refresh);
   if (!parts.refreshToken) {
     return undefined;
   }
 
   const startTime = Date.now();
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
     headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
+      'Content-Type': 'application/x-www-form-urlencoded',
     },
     body: new URLSearchParams({
-      grant_type: "refresh_token",
+      grant_type: 'refresh_token',
       refresh_token: parts.refreshToken,
       client_id: ANTIGRAVITY_CLIENT_ID,
       client_secret: ANTIGRAVITY_CLIENT_SECRET,
@@ -92,15 +125,9 @@ export async function refreshAccessToken(auth: OAuthAuthDetails): Promise<OAuthA
   });
 
   if (!response.ok) {
-    let errorText: string | undefined;
-    try {
-      errorText = await response.text();
-    } catch {
-      errorText = undefined;
-    }
-
-    const { code, description } = parseOAuthErrorPayload(errorText);
-    const details = [code, description ?? errorText].filter(Boolean).join(": ");
+    const errorText = await readResponseText(response);
+    const {code, description} = parseOAuthErrorPayload(errorText);
+    const details = [code, description ?? errorText].filter(Boolean).join(': ');
     const baseMessage = `Antigravity token refresh failed (${response.status} ${response.statusText})`;
     const message = details ? `${baseMessage} - ${details}` : baseMessage;
 

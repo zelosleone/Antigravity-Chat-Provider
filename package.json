@@ -46,11 +46,15 @@
   },
   "scripts": {
     "build": "tsc -p .",
-    "watch": "tsc -w -p ."
+    "watch": "tsc -w -p .",
+    "lint": "gts lint",
+    "fix": "gts fix",
+    "clean": "gts clean"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
     "@types/vscode": "^1.108.0",
+    "gts": "^7.0.0",
     "typescript": "^5.6.3"
   }
 }

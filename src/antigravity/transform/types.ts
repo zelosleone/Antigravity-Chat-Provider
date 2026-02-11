@@ -1,6 +1,6 @@
-import type { HeaderStyle } from "../constants";
+import type {HeaderStyle} from '../constants';
 
-export type ThinkingTier = "minimal" | "low" | "medium" | "high";
+export type ThinkingTier = 'minimal' | 'low' | 'medium' | 'high';
 
 export type RequestPayload = Record<string, unknown>;
 

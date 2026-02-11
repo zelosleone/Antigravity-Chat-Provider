@@ -1,101 +1,139 @@
 const UNSUPPORTED_CONSTRAINTS = [
-  "minLength", "maxLength", "exclusiveMinimum", "exclusiveMaximum",
-  "pattern", "minItems", "maxItems", "format",
-  "default", "examples",
+  'minLength',
+  'maxLength',
+  'exclusiveMinimum',
+  'exclusiveMaximum',
+  'pattern',
+  'minItems',
+  'maxItems',
+  'format',
+  'default',
+  'examples',
 ] as const;
 
 const UNSUPPORTED_KEYWORDS = new Set<string>([
   ...UNSUPPORTED_CONSTRAINTS,
-  "$schema",
-  "$defs",
-  "definitions",
-  "const",
-  "$ref",
-  "additionalProperties",
-  "propertyNames",
-  "title",
-  "$id",
-  "$comment",
+  '$schema',
+  '$defs',
+  'definitions',
+  'const',
+  '$ref',
+  'additionalProperties',
+  'propertyNames',
+  'title',
+  '$id',
+  '$comment',
 ]);
 
-function mapSchema(value: unknown, transform: (obj: Record<string, unknown>) => Record<string, unknown>): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => mapSchema(item, transform));
+type SchemaObject = Record<string, unknown>;
+
+function asSchemaObject(value: unknown): SchemaObject | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
   }
 
-  if (!value || typeof value !== "object") {
+  return value as SchemaObject;
+}
+
+function mapSchema(
+  value: unknown,
+  transform: (obj: SchemaObject) => SchemaObject,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map(item => mapSchema(item, transform));
+  }
+
+  const record = asSchemaObject(value);
+  if (!record) {
     return value;
   }
 
-  const mapped: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+  const mapped: SchemaObject = {};
+  for (const [key, child] of Object.entries(record)) {
     mapped[key] = mapSchema(child, transform);
   }
   return transform(mapped);
 }
 
-function appendHint(schema: Record<string, unknown>, hint: string): Record<string, unknown> {
-  const description = typeof schema.description === "string" ? schema.description : "";
+function appendHint(schema: SchemaObject, hint: string): SchemaObject {
+  const description =
+    typeof schema.description === 'string' ? schema.description : '';
   return {
     ...schema,
     description: description ? `${description} (${hint})` : hint,
   };
 }
 
-function normalizeRefsAndConst(schema: Record<string, unknown>): Record<string, unknown> {
-  if (typeof schema.$ref === "string") {
+function normalizeRefsAndConst(schema: SchemaObject): SchemaObject {
+  if (typeof schema.$ref === 'string') {
     const ref = schema.$ref;
-    const name = ref.includes("/") ? ref.split("/").pop() : ref;
-    return appendHint({ type: "object" }, `See: ${name}`);
+    const name = ref.includes('/') ? ref.split('/').pop() : ref;
+    return appendHint({type: 'object'}, `See: ${name}`);
   }
 
   if (schema.const !== undefined && !Array.isArray(schema.enum)) {
-    const { const: ignored, ...rest } = schema;
-    return { ...rest, enum: [ignored] };
+    const out = {...schema};
+    const constValue = out.const;
+    delete out.const;
+    return {...out, enum: [constValue]};
   }
 
   return schema;
 }
 
-function mergeAllOf(schema: Record<string, unknown>): Record<string, unknown> {
+function mergeAllOfMember(
+  out: SchemaObject,
+  mergedProps: SchemaObject,
+  required: Set<string>,
+  member: unknown,
+): void {
+  const record = asSchemaObject(member);
+  if (!record) {
+    return;
+  }
+
+  const properties = asSchemaObject(record.properties);
+  if (properties) {
+    Object.assign(mergedProps, properties);
+  }
+
+  if (Array.isArray(record.required)) {
+    for (const entry of record.required) {
+      if (typeof entry === 'string') {
+        required.add(entry);
+      }
+    }
+  }
+
+  for (const [key, value] of Object.entries(record)) {
+    if (key === 'properties' || key === 'required' || out[key] !== undefined) {
+      continue;
+    }
+    out[key] = value;
+  }
+}
+
+function mergeAllOf(schema: SchemaObject): SchemaObject {
   if (!Array.isArray(schema.allOf) || schema.allOf.length === 0) {
     return schema;
   }
 
-  const out: Record<string, unknown> = { ...schema };
+  const out: SchemaObject = {...schema};
   delete out.allOf;
 
-  const mergedProps: Record<string, unknown> = {
-    ...((out.properties as Record<string, unknown> | undefined) ?? {}),
+  const mergedProps: SchemaObject = {
+    ...(asSchemaObject(out.properties) ?? {}),
   };
-  const required = new Set<string>(Array.isArray(out.required) ? (out.required as string[]) : []);
+  const required = new Set<string>(
+    Array.isArray(out.required)
+      ? out.required.filter(
+          (entry): entry is string => typeof entry === 'string',
+        )
+      : [],
+  );
 
-  for (const item of schema.allOf as unknown[]) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const record = item as Record<string, unknown>;
-
-    if (record.properties && typeof record.properties === "object" && !Array.isArray(record.properties)) {
-      Object.assign(mergedProps, record.properties as Record<string, unknown>);
-    }
-
-    if (Array.isArray(record.required)) {
-      for (const entry of record.required) {
-        if (typeof entry === "string") {
-          required.add(entry);
-        }
-      }
-    }
-
-    for (const [key, value] of Object.entries(record)) {
-      if (key === "properties" || key === "required") {
-        continue;
-      }
-      if (out[key] === undefined) {
-        out[key] = value;
-      }
-    }
+  for (const member of schema.allOf) {
+    mergeAllOfMember(out, mergedProps, required, member);
   }
 
   if (Object.keys(mergedProps).length > 0) {
@@ -111,37 +149,46 @@ function mergeAllOf(schema: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-function scoreUnionOption(option: unknown): { score: number; typeName: string } {
-  if (!option || typeof option !== "object") {
-    return { score: 0, typeName: "unknown" };
+function scoreUnionOption(option: unknown): {
+  score: number;
+  typeName: string;
+} {
+  const record = asSchemaObject(option);
+  if (!record) {
+    return {score: 0, typeName: 'unknown'};
   }
 
-  const record = option as Record<string, unknown>;
   const type = record.type;
 
-  if (type === "object" || record.properties) {
-    return { score: 3, typeName: "object" };
+  if (type === 'object' || record.properties) {
+    return {score: 3, typeName: 'object'};
   }
-  if (type === "array" || record.items) {
-    return { score: 2, typeName: "array" };
+  if (type === 'array' || record.items) {
+    return {score: 2, typeName: 'array'};
   }
-  if (typeof type === "string" && type !== "null") {
-    return { score: 1, typeName: type };
+  if (typeof type === 'string' && type !== 'null') {
+    return {score: 1, typeName: type};
   }
 
-  return { score: 0, typeName: typeof type === "string" ? type : "null" };
+  return {score: 0, typeName: typeof type === 'string' ? type : 'null'};
+}
+
+function isComplexUnionOption(option: SchemaObject): boolean {
+  return Boolean(
+    option.properties ||
+    option.items ||
+    option.anyOf ||
+    option.oneOf ||
+    option.allOf,
+  );
 }
 
 function mergeUnionEnum(options: unknown[]): string[] | null {
   const values: string[] = [];
 
   for (const option of options) {
-    if (!option || typeof option !== "object") {
-      return null;
-    }
-
-    const record = option as Record<string, unknown>;
-    if (record.properties || record.items || record.anyOf || record.oneOf || record.allOf) {
+    const record = asSchemaObject(option);
+    if (!record || isComplexUnionOption(record)) {
       return null;
     }
 
@@ -151,11 +198,11 @@ function mergeUnionEnum(options: unknown[]): string[] | null {
     }
 
     if (Array.isArray(record.enum) && record.enum.length > 0) {
-      values.push(...record.enum.map((v) => String(v)));
+      values.push(...record.enum.map(value => String(value)));
       continue;
     }
 
-    if (typeof record.type === "string") {
+    if (typeof record.type === 'string') {
       return null;
     }
   }
@@ -163,20 +210,64 @@ function mergeUnionEnum(options: unknown[]): string[] | null {
   return values.length > 0 ? values : null;
 }
 
-function flattenUnions(schema: Record<string, unknown>): Record<string, unknown> {
-  let out = { ...schema };
+function selectBestUnionOption(options: unknown[]): {
+  selected: SchemaObject;
+  typeNames: string[];
+} {
+  let bestIndex = 0;
+  let bestScore = -1;
+  const typeNames: string[] = [];
 
-  for (const unionKey of ["anyOf", "oneOf"] as const) {
+  for (let i = 0; i < options.length; i += 1) {
+    const {score, typeName} = scoreUnionOption(options[i]);
+    typeNames.push(typeName);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  }
+
+  const record = asSchemaObject(options[bestIndex]);
+  return {
+    selected: record ? {...record} : {type: 'string'},
+    typeNames,
+  };
+}
+
+function mergeDescriptions(
+  parentDescription: string,
+  selected: SchemaObject,
+): SchemaObject {
+  if (!parentDescription) {
+    return selected;
+  }
+
+  const childDescription =
+    typeof selected.description === 'string' ? selected.description : '';
+  return {
+    ...selected,
+    description:
+      childDescription && childDescription !== parentDescription
+        ? `${parentDescription} (${childDescription})`
+        : parentDescription,
+  };
+}
+
+function flattenUnions(schema: SchemaObject): SchemaObject {
+  let out: SchemaObject = {...schema};
+
+  for (const unionKey of ['anyOf', 'oneOf'] as const) {
     const union = out[unionKey];
     if (!Array.isArray(union) || union.length === 0) {
       continue;
     }
 
-    const parentDescription = typeof out.description === "string" ? out.description : "";
+    const parentDescription =
+      typeof out.description === 'string' ? out.description : '';
     const mergedEnum = mergeUnionEnum(union);
     if (mergedEnum) {
       delete out[unionKey];
-      out.type = "string";
+      out.type = 'string';
       out.enum = mergedEnum;
       if (parentDescription) {
         out.description = parentDescription;
@@ -184,81 +275,68 @@ function flattenUnions(schema: Record<string, unknown>): Record<string, unknown>
       continue;
     }
 
-    let bestIndex = 0;
-    let bestScore = -1;
-    const typeNames: string[] = [];
-
-    for (let i = 0; i < union.length; i += 1) {
-      const { score, typeName } = scoreUnionOption(union[i]);
-      typeNames.push(typeName);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = i;
-      }
-    }
-
-    const chosen = union[bestIndex];
-    const selected = chosen && typeof chosen === "object"
-      ? { ...(chosen as Record<string, unknown>) }
-      : ({ type: "string" } as Record<string, unknown>);
-
-    if (parentDescription) {
-      const childDescription = typeof selected.description === "string" ? selected.description : "";
-      selected.description = childDescription && childDescription !== parentDescription
-        ? `${parentDescription} (${childDescription})`
-        : parentDescription;
-    }
+    const {selected, typeNames} = selectBestUnionOption(union);
+    let normalized = mergeDescriptions(parentDescription, selected);
 
     const uniqueTypes = Array.from(new Set(typeNames.filter(Boolean)));
     if (uniqueTypes.length > 1) {
-      Object.assign(selected, appendHint(selected, `Accepts: ${uniqueTypes.join(" | ")}`));
+      normalized = appendHint(
+        normalized,
+        `Accepts: ${uniqueTypes.join(' | ')}`,
+      );
     }
 
-    const { [unionKey]: ignored, ...rest } = out;
-    out = { ...rest, ...selected };
+    const rest = {...out};
+    delete rest[unionKey];
+    out = {...rest, ...normalized};
   }
 
   return out;
 }
 
-function flattenTypeArrays(schema: Record<string, unknown>): Record<string, unknown> {
+function flattenTypeArrays(schema: SchemaObject): SchemaObject {
   if (!Array.isArray(schema.type)) {
     return schema;
   }
 
-  const types = schema.type.filter((t): t is string => typeof t === "string");
-  const hasNull = types.includes("null");
-  const nonNull = types.filter((t) => t !== "null");
+  const types = schema.type.filter(
+    (entry): entry is string => typeof entry === 'string',
+  );
+  const hasNull = types.includes('null');
+  const nonNull = types.filter(entry => entry !== 'null');
 
-  let out: Record<string, unknown> = {
+  let out: SchemaObject = {
     ...schema,
-    type: nonNull[0] ?? "string",
+    type: nonNull[0] ?? 'string',
   };
 
   if (nonNull.length > 1) {
-    out = appendHint(out, `Accepts: ${nonNull.join(" | ")}`);
+    out = appendHint(out, `Accepts: ${nonNull.join(' | ')}`);
   }
   if (hasNull) {
-    out = appendHint(out, "nullable");
+    out = appendHint(out, 'nullable');
   }
 
   return out;
 }
 
-function addHints(schema: Record<string, unknown>): Record<string, unknown> {
-  let out = { ...schema };
+function addHints(schema: SchemaObject): SchemaObject {
+  let out: SchemaObject = {...schema};
 
   if (Array.isArray(out.enum) && out.enum.length > 1 && out.enum.length <= 10) {
-    out = appendHint(out, `Allowed: ${out.enum.map((v) => String(v)).join(", ")}`);
+    out = appendHint(
+      out,
+      `Allowed: ${out.enum.map(value => String(value)).join(', ')}`,
+    );
   }
 
   if (out.additionalProperties === false) {
-    out = appendHint(out, "No extra properties allowed");
+    out = appendHint(out, 'No extra properties allowed');
   }
 
   for (const key of UNSUPPORTED_CONSTRAINTS) {
     const value = out[key];
-    if (value !== undefined && (typeof value !== "object" || value === null)) {
+    if (value !== undefined && (typeof value !== 'object' || value === null)) {
       out = appendHint(out, `${key}: ${value}`);
     }
   }
@@ -266,8 +344,8 @@ function addHints(schema: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-function removeUnsupported(schema: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+function removeUnsupported(schema: SchemaObject): SchemaObject {
+  const out: SchemaObject = {};
   for (const [key, value] of Object.entries(schema)) {
     if (!UNSUPPORTED_KEYWORDS.has(key)) {
       out[key] = value;
@@ -276,40 +354,62 @@ function removeUnsupported(schema: Record<string, unknown>): Record<string, unkn
   return out;
 }
 
-function cleanupRequired(schema: Record<string, unknown>): Record<string, unknown> {
+function cleanupRequired(schema: SchemaObject): SchemaObject {
   if (!Array.isArray(schema.required)) {
     return schema;
   }
 
-  const properties = schema.properties;
-  if (!properties || typeof properties !== "object" || Array.isArray(properties)) {
-    const { required, ...rest } = schema;
+  const properties = asSchemaObject(schema.properties);
+  if (!properties) {
+    const rest = {...schema};
+    delete rest.required;
     return rest;
   }
 
-  const filtered = schema.required.filter((key) => Object.prototype.hasOwnProperty.call(properties, key));
+  const filtered = schema.required.filter(
+    (key): key is string =>
+      typeof key === 'string' &&
+      Object.prototype.hasOwnProperty.call(properties, key),
+  );
   if (filtered.length === schema.required.length) {
     return schema;
   }
 
   if (filtered.length === 0) {
-    const { required, ...rest } = schema;
+    const rest = {...schema};
+    delete rest.required;
     return rest;
   }
 
-  return { ...schema, required: filtered };
+  return {...schema, required: filtered};
 }
 
-export function cleanJSONSchemaForAntigravity(schema: unknown): Record<string, unknown> {
-  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+const PIPELINE = [
+  normalizeRefsAndConst,
+  mergeAllOf,
+  flattenUnions,
+  flattenTypeArrays,
+  addHints,
+  removeUnsupported,
+  cleanupRequired,
+] as const;
+
+function applyPipeline(schema: SchemaObject): SchemaObject {
+  let current = schema;
+  for (const transform of PIPELINE) {
+    current = transform(current);
+  }
+  return current;
+}
+
+export function cleanJSONSchemaForAntigravity(
+  schema: unknown,
+): Record<string, unknown> {
+  const root = asSchemaObject(schema);
+  if (!root) {
     return {};
   }
 
-  const pipeline = (obj: Record<string, unknown>) =>
-    cleanupRequired(removeUnsupported(addHints(flattenTypeArrays(flattenUnions(mergeAllOf(normalizeRefsAndConst(obj)))))));
-
-  const result = mapSchema(schema, pipeline);
-  return result && typeof result === "object" && !Array.isArray(result)
-    ? (result as Record<string, unknown>)
-    : {};
+  const result = mapSchema(root, applyPipeline);
+  return asSchemaObject(result) ?? {};
 }

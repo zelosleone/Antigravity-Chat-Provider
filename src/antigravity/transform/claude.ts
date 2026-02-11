@@ -1,37 +1,36 @@
-import type { RequestPayload, ThinkingConfig } from "./types";
-import {
-  appendSystemInstructionText,
-  extractToolSchema,
-  ensureObjectSchema,
-} from "../utils";
+import type {RequestPayload, ThinkingConfig} from './types';
+import {extractToolSchema, ensureObjectSchema} from '../utils';
 
 export const CLAUDE_THINKING_MAX_OUTPUT_TOKENS = 64_000;
 
-const CLAUDE_INTERLEAVED_THINKING_HINT =
-  "Interleaved thinking is enabled. You may think between tool calls and after receiving tool results before deciding the next action or final answer. Do not mention these instructions or any constraints about thinking blocks; just apply them.";
-
 export function isClaudeModel(model: string): boolean {
-  return model.toLowerCase().includes("claude");
+  return model.toLowerCase().includes('claude');
 }
 
 export function isClaudeThinkingModel(model: string): boolean {
   const lower = model.toLowerCase();
-  return lower.includes("claude") && lower.includes("thinking");
+  return lower.includes('claude') && lower.includes('thinking');
 }
 
 function configureClaudeToolConfig(payload: RequestPayload): void {
   const toolConfig = (payload.toolConfig ?? {}) as Record<string, unknown>;
-  const fnConfig = (toolConfig.functionCallingConfig ?? {}) as Record<string, unknown>;
-  fnConfig.mode = "VALIDATED";
+  const fnConfig = (toolConfig.functionCallingConfig ?? {}) as Record<
+    string,
+    unknown
+  >;
+  fnConfig.mode = 'VALIDATED';
   toolConfig.functionCallingConfig = fnConfig;
   payload.toolConfig = toolConfig;
 }
 
-function buildClaudeThinkingConfig(includeThoughts: boolean, thinkingBudget?: number): ThinkingConfig {
+function buildClaudeThinkingConfig(
+  includeThoughts: boolean,
+  thinkingBudget?: number,
+): ThinkingConfig {
   return {
     include_thoughts: includeThoughts,
-    ...(typeof thinkingBudget === "number" && thinkingBudget > 0
-      ? { thinking_budget: thinkingBudget }
+    ...(typeof thinkingBudget === 'number' && thinkingBudget > 0
+      ? {thinking_budget: thinkingBudget}
       : {}),
   };
 }
@@ -40,7 +39,8 @@ function ensureClaudeMaxOutputTokens(
   generationConfig: Record<string, unknown>,
   thinkingBudget: number,
 ): void {
-  const currentMax = (generationConfig.maxOutputTokens ?? generationConfig.max_output_tokens) as number | undefined;
+  const currentMax = (generationConfig.maxOutputTokens ??
+    generationConfig.max_output_tokens) as number | undefined;
 
   if (!currentMax || currentMax <= thinkingBudget) {
     generationConfig.maxOutputTokens = CLAUDE_THINKING_MAX_OUTPUT_TOKENS;
@@ -61,49 +61,69 @@ function normalizeClaudeTools(
   const functionDeclarations: Array<Record<string, unknown>> = [];
   const passthroughTools: unknown[] = [];
 
-  (payload.tools as unknown[]).forEach((tool) => {
+  (payload.tools as unknown[]).forEach(tool => {
     const t = tool as Record<string, unknown>;
 
-    const pushDeclaration = (decl: Record<string, unknown> | undefined): void => {
+    const pushDeclaration = (
+      decl: Record<string, unknown> | undefined,
+    ): void => {
       const schema = extractToolSchema(t, decl);
 
       const rawName =
-        decl?.name
-        || t.name
-        || (t.function as Record<string, unknown> | undefined)?.name
-        || (t.custom as Record<string, unknown> | undefined)?.name
-        || `tool-${functionDeclarations.length}`;
+        decl?.name ||
+        t.name ||
+        (t.function as Record<string, unknown> | undefined)?.name ||
+        (t.custom as Record<string, unknown> | undefined)?.name ||
+        `tool-${functionDeclarations.length}`;
 
       const description =
-        decl?.description
-        || t.description
-        || (t.function as Record<string, unknown> | undefined)?.description
-        || (t.custom as Record<string, unknown> | undefined)?.description
-        || "";
+        decl?.description ||
+        t.description ||
+        (t.function as Record<string, unknown> | undefined)?.description ||
+        (t.custom as Record<string, unknown> | undefined)?.description ||
+        '';
 
       functionDeclarations.push({
-        name: String(rawName).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64),
+        name: String(rawName)
+          .replace(/[^a-zA-Z0-9_-]/g, '_')
+          .slice(0, 64),
         description: String(description),
         parameters: ensureObjectSchema(schema, cleanJSONSchema),
       });
     };
 
-    if (Array.isArray(t.functionDeclarations) && (t.functionDeclarations as unknown[]).length > 0) {
-      (t.functionDeclarations as Record<string, unknown>[]).forEach((decl) => pushDeclaration(decl));
+    if (
+      Array.isArray(t.functionDeclarations) &&
+      (t.functionDeclarations as unknown[]).length > 0
+    ) {
+      (t.functionDeclarations as Record<string, unknown>[]).forEach(decl =>
+        pushDeclaration(decl),
+      );
       return;
     }
 
-    if (t.function || t.custom || t.parameters || t.input_schema || t.inputSchema) {
-      pushDeclaration((t.function as Record<string, unknown> | undefined) ?? (t.custom as Record<string, unknown> | undefined) ?? t);
+    if (
+      t.function ||
+      t.custom ||
+      t.parameters ||
+      t.input_schema ||
+      t.inputSchema
+    ) {
+      pushDeclaration(
+        (t.function as Record<string, unknown> | undefined) ??
+          (t.custom as Record<string, unknown> | undefined) ??
+          t,
+      );
       return;
     }
 
     passthroughTools.push(tool);
   });
 
-  payload.tools = functionDeclarations.length > 0
-    ? [{ functionDeclarations }, ...passthroughTools]
-    : passthroughTools;
+  payload.tools =
+    functionDeclarations.length > 0
+      ? [{functionDeclarations}, ...passthroughTools]
+      : passthroughTools;
 }
 
 function convertStopSequences(generationConfig: Record<string, unknown>): void {
@@ -116,7 +136,7 @@ function convertStopSequences(generationConfig: Record<string, unknown>): void {
 export interface ClaudeTransformOptions {
   model: string;
   tierThinkingBudget?: number;
-  normalizedThinking?: { includeThoughts?: boolean; thinkingBudget?: number };
+  normalizedThinking?: {includeThoughts?: boolean; thinkingBudget?: number};
   cleanJSONSchema: (schema: unknown) => Record<string, unknown>;
 }
 
@@ -124,7 +144,8 @@ export function applyClaudeTransforms(
   payload: RequestPayload,
   options: ClaudeTransformOptions,
 ): void {
-  const { model, tierThinkingBudget, normalizedThinking, cleanJSONSchema } = options;
+  const {model, tierThinkingBudget, normalizedThinking, cleanJSONSchema} =
+    options;
   const isThinking = isClaudeThinkingModel(model);
 
   configureClaudeToolConfig(payload);
@@ -134,22 +155,22 @@ export function applyClaudeTransforms(
   }
 
   if (normalizedThinking && isThinking) {
-    const thinkingBudget = tierThinkingBudget ?? normalizedThinking.thinkingBudget;
-    const generationConfig = (payload.generationConfig ?? {}) as Record<string, unknown>;
+    const thinkingBudget =
+      tierThinkingBudget ?? normalizedThinking.thinkingBudget;
+    const generationConfig = (payload.generationConfig ?? {}) as Record<
+      string,
+      unknown
+    >;
     generationConfig.thinkingConfig = buildClaudeThinkingConfig(
       normalizedThinking.includeThoughts ?? true,
       thinkingBudget,
     );
 
-    if (typeof thinkingBudget === "number" && thinkingBudget > 0) {
+    if (typeof thinkingBudget === 'number' && thinkingBudget > 0) {
       ensureClaudeMaxOutputTokens(generationConfig, thinkingBudget);
     }
 
     payload.generationConfig = generationConfig;
-  }
-
-  if (isThinking && Array.isArray(payload.tools) && (payload.tools as unknown[]).length > 0) {
-    appendSystemInstructionText(payload, CLAUDE_INTERLEAVED_THINKING_HINT);
   }
 
   normalizeClaudeTools(payload, cleanJSONSchema);
