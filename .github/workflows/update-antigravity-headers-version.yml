@@ -1,0 +1,53 @@
+name: Update Antigravity Headers Version
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-antigravity-headers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+
+      - name: Detect latest Antigravity version and update headers
+        id: updater
+        run: node scripts/update-antigravity-headers-version.mjs
+
+      - name: Install dependencies
+        if: ${{ steps.updater.outputs.changed == 'true' }}
+        run: npm ci
+
+      - name: Validate updated code
+        if: ${{ steps.updater.outputs.changed == 'true' }}
+        run: |
+          npm run lint
+          npm run build
+
+      - name: Create pull request
+        if: ${{ steps.updater.outputs.changed == 'true' }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: "chore/update-antigravity-headers-${{ steps.updater.outputs.latest_version }}"
+          commit-message: "chore(headers): bump Antigravity User-Agent to ${{ steps.updater.outputs.latest_version }}"
+          title: "chore(headers): bump Antigravity User-Agent to ${{ steps.updater.outputs.latest_version }}"
+          body: |
+            Automated update from `https://antigravity.google/changelog`.
+
+            - Previous version: `${{ steps.updater.outputs.current_version }}`
+            - New version: `${{ steps.updater.outputs.latest_version }}`
+            - Updated file: `src/antigravity/constants.ts`
+          delete-branch: true
