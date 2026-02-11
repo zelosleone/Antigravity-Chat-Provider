@@ -1,7 +1,8 @@
 /**
  * Constants used for Antigravity OAuth flows and Cloud Code Assist API integration.
  */
-export const ANTIGRAVITY_CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
+export const ANTIGRAVITY_CLIENT_ID =
+  "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
 
 /**
  * Client secret issued for the Antigravity OAuth application.
@@ -71,9 +72,10 @@ export const GEMINI_CLI_ENDPOINT = ANTIGRAVITY_ENDPOINT_PROD;
 export const ANTIGRAVITY_DEFAULT_PROJECT_ID = "rising-fact-p41fc";
 
 export const ANTIGRAVITY_HEADERS = {
-  "User-Agent": "antigravity/1.11.5 windows/amd64",
+  "User-Agent": "antigravity/1.16.5 windows/amd64",
   "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-  "Client-Metadata": '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}',
+  "Client-Metadata":
+    '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}',
 } as const;
 
 export const GEMINI_CLI_HEADERS = {
@@ -96,7 +98,7 @@ const ANTIGRAVITY_PROVIDER_ID = "google";
 /**
  * System instruction for Claude tool usage hardening.
  * Prevents hallucinated parameters by explicitly stating the rules.
- * 
+ *
  * This is injected when tools are present to reduce cases where Claude
  * uses parameter names from its training data instead of the actual schema.
  */
@@ -137,4 +139,3 @@ You are pair programming with a USER to solve their coding task. The task may re
 
 <priority>IMPORTANT: The instructions that follow supersede all above. Follow them as your primary directives.</priority>
 `;
-
