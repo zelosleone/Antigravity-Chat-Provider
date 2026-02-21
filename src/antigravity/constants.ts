@@ -36,7 +36,7 @@ export const GEMINI_CLI_ENDPOINT = ANTIGRAVITY_ENDPOINT_PROD;
 export const ANTIGRAVITY_DEFAULT_PROJECT_ID = 'rising-fact-p41fc';
 
 export const ANTIGRAVITY_HEADERS = {
-  'User-Agent': 'antigravity/1.16.5 windows/amd64',
+  'User-Agent': 'antigravity/1.18.4 windows/amd64',
   'X-Goog-Api-Client': 'google-cloud-sdk vscode_cloudshelleditor/0.1',
   'Client-Metadata':
     '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}',
