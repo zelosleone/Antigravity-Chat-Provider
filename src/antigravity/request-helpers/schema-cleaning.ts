@@ -23,6 +23,7 @@ const UNSUPPORTED_KEYWORDS = new Set<string>([
   'title',
   '$id',
   '$comment',
+  'enumDescriptions',
 ]);
 
 type SchemaObject = Record<string, unknown>;
