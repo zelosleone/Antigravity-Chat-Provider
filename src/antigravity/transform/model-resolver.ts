@@ -10,18 +10,21 @@ const THINKING_TIER_BUDGETS = {
 const MODEL_ALIASES: Record<string, string> = {
   'gemini-3-pro-low': 'gemini-3-pro',
   'gemini-3-pro-high': 'gemini-3-pro',
+  'gemini-3.1-pro-low': 'gemini-3.1-pro',
+  'gemini-3.1-pro-high': 'gemini-3.1-pro',
   'gemini-3-flash-low': 'gemini-3-flash',
   'gemini-3-flash-medium': 'gemini-3-flash',
   'gemini-3-flash-high': 'gemini-3-flash',
-  'gemini-claude-sonnet-4-5': 'claude-sonnet-4-5',
-  'gemini-claude-sonnet-4-5-thinking-low': 'claude-sonnet-4-5-thinking',
-  'gemini-claude-sonnet-4-5-thinking-medium': 'claude-sonnet-4-5-thinking',
-  'gemini-claude-sonnet-4-5-thinking-high': 'claude-sonnet-4-5-thinking',
+  'gemini-claude-sonnet-4-6': 'claude-sonnet-4-6',
+  'gemini-claude-sonnet-4-6-thinking-low': 'claude-sonnet-4-6-thinking',
+  'gemini-claude-sonnet-4-6-thinking-medium': 'claude-sonnet-4-6-thinking',
+  'gemini-claude-sonnet-4-6-thinking-high': 'claude-sonnet-4-6-thinking',
   'gemini-claude-opus-4-6-thinking-low': 'claude-opus-4-6-thinking',
   'gemini-claude-opus-4-6-thinking-medium': 'claude-opus-4-6-thinking',
   'gemini-claude-opus-4-6-thinking-high': 'claude-opus-4-6-thinking',
   'claude-opus-4-6-thinking-max': 'claude-opus-4-6-thinking',
   'gemini-3-pro-image-preview': 'gemini-3-pro-image',
+  'gemini-3.1-pro-image-preview': 'gemini-3.1-pro-image',
 };
 
 const MODEL_FALLBACKS: Record<string, string> = {
@@ -88,9 +91,9 @@ export function resolveModelWithTier(requestedModel: string): ResolvedModel {
   const isGemini3 = modelWithoutQuota.toLowerCase().startsWith('gemini-3');
   const skipAlias = isAntigravity && isGemini3;
 
-  const isGemini3Pro = modelWithoutQuota
-    .toLowerCase()
-    .startsWith('gemini-3-pro');
+  const isGemini3Pro =
+    modelWithoutQuota.toLowerCase().startsWith('gemini-3-pro') ||
+    modelWithoutQuota.toLowerCase().startsWith('gemini-3.1-pro');
   const isGemini3Flash = modelWithoutQuota
     .toLowerCase()
     .startsWith('gemini-3-flash');
